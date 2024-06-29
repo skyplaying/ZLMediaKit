@@ -8,6 +8,7 @@
  * may be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <exception>
 #include <sys/stat.h>
 #include <math.h>
 #include <signal.h>
@@ -45,7 +46,7 @@
 #include "Http/HttpRequester.h"
 #include "Player/PlayerProxy.h"
 #include "Pusher/PusherProxy.h"
-#include "Rtp/RtpSelector.h"
+#include "Rtp/RtpProcess.h"
 #include "Record/MP4Reader.h"
 
 #if defined(ENABLE_RTPPROXY)
@@ -323,6 +324,11 @@ public:
         return _map.erase(key);
     }
 
+    size_t size() { 
+        std::lock_guard<std::recursive_mutex> lck(_mtx);
+        return _map.size();
+    }
+
     Pointer find(const std::string &key) const {
         std::lock_guard<std::recursive_mutex> lck(_mtx);
         auto it = _map.find(key);
@@ -480,7 +486,7 @@ uint16_t openRtpServer(uint16_t local_port, const string &stream_id, int tcp_mod
     auto server = s_rtp_server.makeWithAction(stream_id, [&](RtpServer::Ptr server) {
         server->start(local_port, stream_id, (RtpServer::TcpMode)tcp_mode, local_ip.c_str(), re_use_port, ssrc, only_track, multiplex);
     });
-    server->setOnDetach([stream_id]() {
+    server->setOnDetach([stream_id](const SockException &ex) {
         //设置rtp超时移除事件
         s_rtp_server.erase(stream_id);
     });
@@ -1193,8 +1199,8 @@ void installWebApi() {
     api_regist("/index/api/getRtpInfo",[](API_ARGS_MAP){
         CHECK_SECRET();
         CHECK_ARGS("stream_id");
-
-        auto process = RtpSelector::Instance().getProcess(allArgs["stream_id"], false);
+        auto src = MediaSource::find(DEFAULT_VHOST, kRtpAppName, allArgs["stream_id"]);
+        auto process = src ? src->getRtpProcess() : nullptr;
         if (!process) {
             val["exist"] = false;
             return;
@@ -1433,9 +1439,10 @@ void installWebApi() {
         CHECK_SECRET();
         CHECK_ARGS("stream_id");
         //只是暂停流的检查，流媒体服务器做为流负载服务，收流就转发，RTSP/RTMP有自己暂停协议
-        auto rtp_process = RtpSelector::Instance().getProcess(allArgs["stream_id"], false);
-        if (rtp_process) {
-            rtp_process->setStopCheckRtp(true);
+        auto src = MediaSource::find(DEFAULT_VHOST, kRtpAppName, allArgs["stream_id"]);
+        auto process = src ? src->getRtpProcess() : nullptr;
+        if (process) {
+            process->setStopCheckRtp(true);
         } else {
             val["code"] = API::NotFound;
         }
@@ -1444,9 +1451,10 @@ void installWebApi() {
     api_regist("/index/api/resumeRtpCheck", [](API_ARGS_MAP) {
         CHECK_SECRET();
         CHECK_ARGS("stream_id");
-        auto rtp_process = RtpSelector::Instance().getProcess(allArgs["stream_id"], false);
-        if (rtp_process) {
-            rtp_process->setStopCheckRtp(false);
+        auto src = MediaSource::find(DEFAULT_VHOST, kRtpAppName, allArgs["stream_id"]);
+        auto process = src ? src->getRtpProcess() : nullptr;
+        if (process) {
+            process->setStopCheckRtp(false);
         } else {
             val["code"] = API::NotFound;
         }
@@ -1943,9 +1951,29 @@ void installWebApi() {
 
     api_regist("/index/api/stack/start", [](API_ARGS_JSON_ASYNC) {
         CHECK_SECRET();
-        auto ret = VideoStackManager::Instance().startVideoStack(allArgs.args);
-        val["code"] = ret;
-        val["msg"] = ret ? "failed" : "success";
+        int ret = 0;
+        try {
+            ret = VideoStackManager::Instance().startVideoStack(allArgs.args);
+            val["code"] = ret;
+            val["msg"] = ret ? "failed" : "success";
+        } catch (const std::exception &e) {
+            val["code"] = -1;
+            val["msg"] = e.what();
+        }
+        invoker(200, headerOut, val.toStyledString());
+    });
+
+    api_regist("/index/api/stack/reset", [](API_ARGS_JSON_ASYNC) {
+        CHECK_SECRET();
+        int ret = 0;
+        try {
+            auto ret = VideoStackManager::Instance().resetVideoStack(allArgs.args);
+            val["code"] = ret;
+            val["msg"] = ret ? "failed" : "success";
+        } catch (const std::exception &e) {
+            val["code"] = -1;
+            val["msg"] = e.what();
+        }
         invoker(200, headerOut, val.toStyledString());
     });
 
@@ -1966,6 +1994,9 @@ void unInstallWebApi(){
     s_pusher_proxy.clear();
 #if defined(ENABLE_RTPPROXY)
     s_rtp_server.clear();
+#endif
+#if defined(ENABLE_VIDEOSTACK) && defined(ENABLE_FFMPEG) && defined(ENABLE_X264)
+    VideoStackManager::Instance().clear();
 #endif
 
     NoticeCenter::Instance().delListener(&web_api_tag);
