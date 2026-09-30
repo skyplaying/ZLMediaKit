@@ -55,6 +55,13 @@ bool DataPacket::loadFromData(uint8_t *buf, size_t len) {
     return true;
 }
 
+bool DataPacket::reloadPayload(uint8_t *buf, size_t len) {
+    _data->setCapacity(len + HEADER_SIZE);
+    _data->setSize(len + HEADER_SIZE);
+    memcpy(_data->data() + HEADER_SIZE, buf, len);
+    return true;
+}
+
 bool DataPacket::storeToHeader() {
     if (!_data || _data->size() < HEADER_SIZE) {
         WarnL << "data size less " << HEADER_SIZE;
@@ -162,6 +169,12 @@ uint16_t ControlPacket::getControlType(uint8_t *buf, size_t len) {
     return control_type;
 }
 
+uint16_t ControlPacket::getSubType(uint8_t *buf, size_t len) {
+    uint8_t *ptr = buf;
+    uint16_t subtype = loadUint16(ptr + 2);
+    return subtype;
+}
+
 bool ControlPacket::loadHeader() {
     uint8_t *ptr = (uint8_t *)_data->data();
     f = ptr[0] >> 7;
@@ -225,6 +238,20 @@ size_t ControlPacket::size() const {
 uint32_t ControlPacket::getSocketID(uint8_t *buf, size_t len) {
     return loadUint32(buf + 12);
 }
+
+#define XX(name, value, str) {str, name},
+std::map<std::string, SRT_REJECT_REASON> reject_map = {REJ_MAP(XX)};
+#undef XX
+
+std::string getRejectReason(SRT_REJECT_REASON code) {
+    switch (code) {
+#define XX(name, value, str) case name : return str;
+        REJ_MAP(XX)
+#undef XX
+        default : return "invalid";
+    }
+}
+
 std::string HandshakePacket::dump(){
     _StrPrinter printer;
     printer <<"flag:"<< (int)f<<"\r\n";
@@ -252,7 +279,7 @@ std::string HandshakePacket::dump(){
     for(size_t i=0;i<ext_list.size();++i){
         printer<<ext_list[i]->dump()<<"\r\n";
     }
-    return std::move(printer);
+    return printer;
 }
 bool HandshakePacket::loadFromData(uint8_t *buf, size_t len) {
     if (HEADER_SIZE + HS_CONTENT_MIN_SIZE > len) {
@@ -292,8 +319,8 @@ bool HandshakePacket::loadFromData(uint8_t *buf, size_t len) {
     syn_cookie = loadUint32(ptr);
     ptr += 4;
 
-    memcpy(peer_ip_addr, ptr, sizeof(peer_ip_addr) * sizeof(peer_ip_addr[0]));
-    ptr += sizeof(peer_ip_addr) * sizeof(peer_ip_addr[0]);
+    memcpy(peer_ip_addr, ptr, sizeof(peer_ip_addr));
+    ptr += sizeof(peer_ip_addr);
 
     if (encryption_field != NO_ENCRYPTION) {
         ErrorL << "not support encryption " << encryption_field;
@@ -313,21 +340,38 @@ bool HandshakePacket::loadFromData(uint8_t *buf, size_t len) {
 
 bool HandshakePacket::loadExtMessage(uint8_t *buf, size_t len) {
     uint8_t *ptr = buf;
+    uint8_t *end = buf + len;
     ext_list.clear();
     uint16_t type;
     uint16_t length;
     HSExt::Ptr ext;
-    while (ptr < buf + len) {
+    while (ptr < end) {
+        // Ensure the 4-byte extension block header is fully present
+        if (static_cast<size_t>(end - ptr) < 4) {
+            WarnL << "truncated HS EXT header, remaining=" << (end - ptr);
+            break;
+        }
         type = loadUint16(ptr);
         length = loadUint16(ptr + 2);
+        // Attacker-controlled length: verify the declared block size fits in the datagram
+        // before handing it to any loader (which may memcpy the declared length).
+        const size_t block_size = static_cast<size_t>(length) * 4 + 4;
+        if (block_size > static_cast<size_t>(end - ptr)) {
+            WarnL << "HS EXT block exceeds datagram, type=" << type
+                  << " declared=" << block_size << " remaining=" << (end - ptr);
+            break;
+        }
         switch (type) {
             case HSExt::SRT_CMD_HSREQ:
             case HSExt::SRT_CMD_HSRSP: ext = std::make_shared<HSExtMessage>(); break;
             case HSExt::SRT_CMD_SID: ext = std::make_shared<HSExtStreamID>(); break;
+            case HSExt::SRT_CMD_KMREQ:
+            case HSExt::SRT_CMD_KMRSP: 
+                ext = std::make_shared<HSExtKeyMaterial>(); break;
             default: WarnL << "not support ext " << type; break;
         }
         if (ext) {
-            if (ext->loadFromData(ptr, length * 4 + 4)) {
+            if (ext->loadFromData(ptr, block_size)) {
                 ext_list.push_back(std::move(ext));
             } else {
                 WarnL << "parse HS EXT failed type=" << type << " len=" << length;
@@ -335,7 +379,7 @@ bool HandshakePacket::loadExtMessage(uint8_t *buf, size_t len) {
             ext = nullptr;
         }
 
-        ptr += length * 4 + 4;
+        ptr += block_size;
     }
     return true;
 }
@@ -400,8 +444,8 @@ bool HandshakePacket::storeToData() {
     storeUint32(ptr, syn_cookie);
     ptr += 4;
 
-    memcpy(ptr, peer_ip_addr, sizeof(peer_ip_addr) * sizeof(peer_ip_addr[0]));
-    ptr += sizeof(peer_ip_addr) * sizeof(peer_ip_addr[0]);
+    memcpy(ptr, peer_ip_addr, sizeof(peer_ip_addr));
+    ptr += sizeof(peer_ip_addr);
 
     if (encryption_field != NO_ENCRYPTION) {
         ErrorL << "not support encryption " << encryption_field;
@@ -433,10 +477,11 @@ uint32_t HandshakePacket::getSynCookie(uint8_t *buf, size_t len) {
 }
 
 void HandshakePacket::assignPeerIP(struct sockaddr_storage *addr) {
-    memset(peer_ip_addr, 0, sizeof(peer_ip_addr) * sizeof(peer_ip_addr[0]));
+    memset(peer_ip_addr, 0, sizeof(peer_ip_addr));
     if (addr->ss_family == AF_INET) {
         struct sockaddr_in *ipv4 = (struct sockaddr_in *)addr;
-        // 抓包 奇怪好像是小头端？？？
+        // 抓包 奇怪好像是小头端？？？  [AUTO-TRANSLATED:40eb164c]
+        // Packet capture, weird, seems to be from the client side？？？
         storeUint32LE(peer_ip_addr, ipv4->sin_addr.s_addr);
     } else if (addr->ss_family == AF_INET6) {
         if (IN6_IS_ADDR_V4MAPPED(&((struct sockaddr_in6 *)addr)->sin6_addr)) {
@@ -445,10 +490,27 @@ void HandshakePacket::assignPeerIP(struct sockaddr_storage *addr) {
             storeUint32LE(peer_ip_addr, addr4.s_addr);
         } else {
             const sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)addr;
-            memcpy(peer_ip_addr, ipv6->sin6_addr.s6_addr, sizeof(peer_ip_addr) * sizeof(peer_ip_addr[0]));
+            memcpy(peer_ip_addr, ipv6->sin6_addr.s6_addr, sizeof(peer_ip_addr));
         }
     }
 }
+
+void HandshakePacket::assignPeerIPBE(struct sockaddr_storage *addr) {
+    memset(peer_ip_addr, 0, sizeof(peer_ip_addr) * sizeof(peer_ip_addr[0]));
+    if (addr->ss_family == AF_INET) {
+        struct sockaddr_in *ipv4 = (struct sockaddr_in *)addr;
+        storeUint32(peer_ip_addr, ipv4->sin_addr.s_addr);
+    } else if (addr->ss_family == AF_INET6) {
+        if (IN6_IS_ADDR_V4MAPPED(&((struct sockaddr_in6 *)addr)->sin6_addr)) {
+            struct in_addr addr4;
+            memcpy(&addr4, 12 + (char *)&(((struct sockaddr_in6 *)addr)->sin6_addr), 4);
+            storeUint32(peer_ip_addr, addr4.s_addr);
+        } else {
+            const sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)addr;
+            memcpy(peer_ip_addr, ipv6->sin6_addr.s6_addr, sizeof(peer_ip_addr) * sizeof(peer_ip_addr[0]));
+        }
+     }
+ }
 
 uint32_t HandshakePacket::generateSynCookie(
     struct sockaddr_storage *addr, TimePoint ts, uint32_t current_cookie, int correction) {
@@ -517,11 +579,25 @@ bool NAKPacket::loadFromData(uint8_t *buf, size_t len) {
     LostPair lost;
     while (ptr < end) {
         if ((*ptr) & 0x80) {
+            // 区间模式需要读取8字节，剩余不足则为畸形包  [AUTO-TRANSLATED:e33c05c1]
+            // Range mode reads 8 bytes; insufficient remainder means malformed packet
+            if ((size_t)(end - ptr) < 8) {
+                WarnL << "malformed NAK packet: truncated range CIF, remaining " << (size_t)(end - ptr) << " bytes";
+                lost_list.clear();
+                return false;
+            }
             lost.first = loadUint32(ptr) & 0x7fffffff;
             lost.second = loadUint32(ptr + 4) & 0x7fffffff;
             lost.second += 1;
             ptr += 8;
         } else {
+            // 单点模式需要读取4字节，剩余不足则为畸形包  [AUTO-TRANSLATED:e33c05c1]
+            // Single mode reads 4 bytes; insufficient remainder means malformed packet
+            if ((size_t)(end - ptr) < 4) {
+                WarnL << "malformed NAK packet: truncated single CIF, remaining " << (size_t)(end - ptr) << " bytes";
+                lost_list.clear();
+                return false;
+            }
             lost.first = loadUint32(ptr);
             lost.second = lost.first + 1;
             ptr += 4;
@@ -579,7 +655,7 @@ std::string NAKPacket::dump() {
     for (auto it : lost_list) {
         printer << "[ " << it.first << " , " << it.second - 1 << " ]";
     }
-    return std::move(printer);
+    return printer;
 }
 
 bool MsgDropReqPacket::loadFromData(uint8_t *buf, size_t len) {

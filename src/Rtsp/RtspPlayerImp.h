@@ -51,7 +51,13 @@ public:
     }
 
     void seekTo(uint32_t seekPos) override {
-        uint32_t pos = MAX(float(0), MIN(seekPos, getDuration())) * 1000;
+        uint32_t pos = seekPos * 1000;
+        // 如果是点播流（有时长），限制在有效范围内
+        // If it's a VOD stream (has duration), limit to valid range
+        float duration = getDuration();
+        if (duration > 0) {
+            pos = MAX(float(0), MIN(seekPos, getDuration())) * 1000;
+        }
         seekToMilliSecond(pos);
     }
 
@@ -60,7 +66,8 @@ public:
     std::vector<Track::Ptr> getTracks(bool ready = true) const override;
 
 private:
-    //派生类回调函数
+    // 派生类回调函数  [AUTO-TRANSLATED:61e20903]
+    // Derived class callback function
     bool onCheckSDP(const std::string &sdp) override;
 
     void onRecvRTP(RtpPacket::Ptr rtp, const SdpTrack::Ptr &track) override;

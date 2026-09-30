@@ -47,14 +47,16 @@ enum class RtpExtType : uint8_t {
 
 class RtcMedia;
 
-//使用次对象的方法前需保证RtpHeader内存未释放
+// 使用次对象的方法前需保证RtpHeader内存未释放  [AUTO-TRANSLATED:0378877f]
+// Ensure that the RtpHeader memory has not been released before using the methods of this object
 class RtpExt {
 public:
     template<typename Type>
     friend void appendExt(std::map<uint8_t, RtpExt> &ret, uint8_t *ptr, const uint8_t *end);
     friend class RtpExtContext;
 
-    static std::map<uint8_t/*id*/, RtpExt/*data*/> getExtValue(const RtpHeader *header);
+    // len为rtp数据报实际长度, 用于校验包内声明的扩展长度, 防止堆越界读写
+    static std::map<uint8_t/*id*/, RtpExt/*data*/> getExtValue(const RtpHeader *header, size_t len);
     static RtpExtType getExtType(const std::string &url);
     static const std::string& getExtUrl(RtpExtType type);
     static const char *getExtName(RtpExtType type);
@@ -122,16 +124,19 @@ public:
     void setOnGetRtp(OnGetRtp cb);
     std::string getRid(uint32_t ssrc) const;
     void setRid(uint32_t ssrc, const std::string &rid);
-    RtpExt changeRtpExtId(const RtpHeader *header, bool is_recv, std::string *rid_ptr = nullptr, RtpExtType type = RtpExtType::padding);
+    // len为rtp数据报实际长度, 用于校验包内声明的扩展长度, 防止堆越界读写
+    RtpExt changeRtpExtId(const RtpHeader *header, size_t len, bool is_recv, std::string *rid_ptr = nullptr, RtpExtType type = RtpExtType::padding);
 
 private:
     void onGetRtp(uint8_t pt, uint32_t ssrc, const std::string &rid);
 
 private:
     OnGetRtp _cb;
-    //发送rtp时需要修改rtp ext id
+    // 发送rtp时需要修改rtp ext id  [AUTO-TRANSLATED:b92a494b]
+    // Modify the rtp ext id when sending rtp
     std::map<RtpExtType, uint8_t> _rtp_ext_type_to_id;
-    //接收rtp时需要修改rtp ext id
+    // 接收rtp时需要修改rtp ext id  [AUTO-TRANSLATED:685e7a01]
+    // Modify the rtp ext id when receiving rtp
     std::unordered_map<uint8_t, RtpExtType> _rtp_ext_id_to_type;
     //ssrc --> rid
     std::unordered_map<uint32_t/*simulcast ssrc*/, std::string/*rid*/> _ssrc_to_rid;

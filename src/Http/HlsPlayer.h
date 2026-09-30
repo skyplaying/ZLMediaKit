@@ -33,6 +33,9 @@ public:
     void addTrackCompleted() override { _delegate.addTrackCompleted(); }
     void resetTracks() override { ((MediaSink &)_delegate).resetTracks(); }
     std::vector<Track::Ptr> getTracks(bool ready = true) const override { return _delegate.getTracks(ready); }
+    // 返回已进入媒体消费链的 frame 数，用于 HTTP-TS 输入健康检查。
+    // Return the number of frames entering the media pipeline for HTTP-TS health checks.
+    uint64_t getInputFrameCount() const { return _input_frame_count; }
     void pushTask(std::function<void()> task);
 
 private:
@@ -47,23 +50,35 @@ private:
     toolkit::Timer::Ptr _timer;
     MediaSinkDelegate _delegate;
     std::deque<std::pair<int64_t, std::function<void()> > > _frame_cache;
+    uint64_t _input_frame_count = 0;
 };
 
-class HlsPlayer : public  HttpClientImp , public PlayerBase , public HlsParser{
+class HlsPlayer: public  HttpClientImp, public PlayerBase, public HlsParser {
 public:
     HlsPlayer(const toolkit::EventPoller::Ptr &poller);
 
     /**
      * 开始播放
      * start play
+     * Start playing
+     * start play
+     
+     * [AUTO-TRANSLATED:03d41cf7]
      */
     void play(const std::string &url) override;
 
     /**
      * 停止播放
      * stop play
+     * Stop playing
+     * stop play
+     
+     * [AUTO-TRANSLATED:88068dac]
      */
     void teardown() override;
+
+    size_t getRecvSpeed() override;
+    size_t getRecvTotalBytes() override;
 
 protected:
     /**
@@ -71,8 +86,17 @@ protected:
      * Received ts package
      * @param data ts数据负载 ts data payload
      * @param len ts包长度 ts package length
+     * Received ts package
+     * Received ts package
+     * @param data ts data payload
+     * @param len ts package length
+     
+     * [AUTO-TRANSLATED:159a6559]
      */
     virtual void onPacket(const char *data, size_t len) = 0;
+    // TS 切片下载失败通知；派生类可清理该切片遗留的输入状态。
+    // Notify derived classes to clear input state left by a failed TS segment.
+    virtual void onSegmentDownloadFailed(const toolkit::SockException &ex) {}
 
 private:
     bool onParsed(bool is_m3u8_inner, int64_t sequence, const map<int, ts_segment> &ts_map) override;
@@ -90,7 +114,8 @@ private:
 
 private:
     struct UrlComp {
-        // url忽略？后面的参数
+        // url忽略？后面的参数  [AUTO-TRANSLATED:788784c3]
+        // url ignore? parameters after
         // Ignore the parameters after the url?
         bool operator()(const std::string& __x, const std::string& __y) const {
             return toolkit::split(__x,"?")[0] < toolkit::split(__y,"?")[0];
@@ -112,16 +137,26 @@ private:
     int _timeout_multiple = MIN_TIMEOUT_MULTIPLE;
     int _try_fetch_index_times = 0;
     int _ts_download_failed_count = 0;
+    // RFC 8216 reload interval depends on whether the last media sequence
+    // changed. We intentionally keep this lightweight and only track the
+    // sequence number for live playlist refresh timing.
+    bool _playlist_reload_changed = true;
+
+protected:
+    size_t _recvtotalbytes = 0;
 };
 
-class HlsPlayerImp : public PlayerImp<HlsPlayer, PlayerBase>, private TrackListener {
+class HlsPlayerImp final: public PlayerImp<HlsPlayer, PlayerBase>, private TrackListener {
 public:
     using Ptr = std::shared_ptr<HlsPlayerImp>;
     HlsPlayerImp(const toolkit::EventPoller::Ptr &poller = nullptr);
+    size_t getRecvSpeed() override;
+    size_t getRecvTotalBytes() override;
 
 private:
     //// HlsPlayer override////
     void onPacket(const char *data, size_t len) override;
+    void onSegmentDownloadFailed(const toolkit::SockException &ex) override;
 
 private:
     //// PlayerBase override////

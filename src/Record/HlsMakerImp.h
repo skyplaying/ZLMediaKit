@@ -19,25 +19,42 @@
 
 namespace mediakit {
 
+// availabilityStartTime的修正由onWriteSegment(数据流)驱动而非定时器驱动：
+// 这样它总是在生产分片的那个线程上执行，流停了也就自动停了
+// The availabilityStartTime correction is driven from onWriteSegment (data flow),
+// not from a timer: it is then always executed on the thread that produces the
+// segments and stops by itself when the stream stalls.
 class HlsMakerImp : public HlsMaker {
 public:
     HlsMakerImp(bool is_fmp4, const std::string &m3u8_file, const std::string &params, uint32_t bufSize = 64 * 1024,
-                float seg_duration = 5, uint32_t seg_number = 3, bool seg_keep = false);
+                float seg_duration = 5, uint32_t seg_number = 3, bool seg_keep = false,
+                const std::string &fmp4_seg_ext = ".mp4");
     ~HlsMakerImp() override;
 
     /**
      * 设置媒体信息
+     * Set media information
+     
+     * [AUTO-TRANSLATED:d205db9f]
      */
     void setMediaSource(const MediaTuple& tuple);
 
     /**
      * 获取MediaSource
      * @return
+     * Get MediaSource
+     * @return
+     
+     * [AUTO-TRANSLATED:af916433]
      */
     HlsMediaSource::Ptr getMediaSource() const;
 
      /**
       * 清空缓存
+      * Clear cache
+      
+      
+      * [AUTO-TRANSLATED:f872d7e2]
       */
      void clearCache();
 
@@ -47,25 +64,32 @@ protected:
     void onWriteInitSegment(const char *data, size_t len) override;
     void onWriteSegment(const char *data, size_t len) override;
     void onWriteHls(const std::string &data, bool include_delay) override;
+    void onWriteDash(const std::string &data, bool memory_only) override;
     void onFlushLastSegment(uint64_t duration_ms) override;
 
 private:
     std::shared_ptr<FILE> makeFile(const std::string &file,bool setbuf = false);
     void clearCache(bool immediately, bool eof);
+    void saveCurrentDir();
 
 private:
     int _buf_size;
     std::string _params;
+    std::string _fmp4_seg_ext;
     std::string _path_hls;
     std::string _path_hls_delay;
+    std::string _path_dash;
     std::string _path_init;
     std::string _path_prefix;
+    std::string _current_dir;
+    std::string _current_dir_init_file;
     RecordInfo _info;
     std::shared_ptr<FILE> _file;
     std::shared_ptr<char> _file_buf;
     HlsMediaSource::Ptr _media_src;
     toolkit::EventPoller::Ptr _poller;
     std::map<uint64_t/*index*/,std::string/*file_path*/> _segment_file_paths;
+    std::deque<HlsSegmentInfo> _current_dir_seg_list;
 };
 
 }//namespace mediakit

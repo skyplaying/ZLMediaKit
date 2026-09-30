@@ -10,6 +10,8 @@
 
 #if defined(ENABLE_MP4)
 
+#include <limits>
+
 #include "MP4Muxer.h"
 #include "Common/config.h"
 
@@ -18,8 +20,21 @@ using namespace toolkit;
 
 namespace mediakit {
 
+static constexpr int kMaxMovVideoDimension = (std::numeric_limits<int>::max)() >> 16;
+
+static bool isMovVideoDimensionSafe(int width, int height) {
+    // libmov 将有符号 int 类型的视频宽高左移 16 位写入 16.16 定点数字段，超出此范围会触发未定义行为。
+    // libmov shifts signed int video dimensions left by 16 for a 16.16 fixed-point field; values outside this range cause undefined behavior.
+    return width >= 0 && height >= 0 &&
+           width <= kMaxMovVideoDimension && height <= kMaxMovVideoDimension;
+}
+
 MP4Muxer::~MP4Muxer() {
-    closeMP4();
+    try {
+        closeMP4();
+    } catch (std::exception &e) {
+        WarnL << e.what();
+    }
 }
 
 void MP4Muxer::openMP4(const string &file) {
@@ -85,26 +100,47 @@ void MP4MuxerInterface::flush() {
 bool MP4MuxerInterface::inputFrame(const Frame::Ptr &frame) {
     auto it = _tracks.find(frame->getIndex());
     if (it == _tracks.end()) {
-        // 该Track不存在或初始化失败
+        // 该Track不存在或初始化失败  [AUTO-TRANSLATED:316597dc]
+        // This Track does not exist or initialization failed
         return false;
     }
 
     if (!_started) {
-        // 该逻辑确保含有视频时，第一帧为关键帧
+        // 该逻辑确保含有视频时，第一帧为关键帧  [AUTO-TRANSLATED:04f177fb]
+        // This logic ensures that the first frame is a keyframe when there is video
         if (_have_video && !frame->keyFrame()) {
-            // 含有视频，但是不是关键帧，那么前面的帧丢弃
+            // 含有视频，但是不是关键帧，那么前面的帧丢弃  [AUTO-TRANSLATED:5f0ba99e]
+            // Contains video, but not a keyframe, then the previous frames are discarded
             return false;
         }
-        // 开始写文件
+        // 开始写文件  [AUTO-TRANSLATED:bc3f11e2]
+        // Start writing the file
         _started = true;
     }
 
-    // mp4文件时间戳需要从0开始
+    // fmp4封装超过一定I帧间隔，强制刷新segment，防止内存上涨  [AUTO-TRANSLATED:0be6ef15]
+    // fmp4 encapsulation exceeds a certain I-frame interval, force refresh segment to prevent memory increase
+    if (frame->getTrackType() == TrackVideo && _mov_writter->fmp4) {
+        if (frame->keyFrame()) {
+            _non_iframe_video_count = 0;
+        } else {
+            _non_iframe_video_count++;
+        }
+
+        if (_non_iframe_video_count > 200) {
+            saveSegment();
+            _non_iframe_video_count = 0;
+        }
+    }
+
+    // mp4文件时间戳需要从0开始  [AUTO-TRANSLATED:c963b841]
+    // The mp4 file timestamp needs to start from 0
     auto &track = it->second;
     switch (frame->getCodecId()) {
         case CodecH264:
         case CodecH265: {
-            // 这里的代码逻辑是让SPS、PPS、IDR这些时间戳相同的帧打包到一起当做一个帧处理，
+            // 这里的代码逻辑是让SPS、PPS、IDR这些时间戳相同的帧打包到一起当做一个帧处理，  [AUTO-TRANSLATED:edf57c32]
+            // The code logic here is to package frames with the same timestamp, such as SPS, PPS, and IDR, as one frame,
             track.merger.inputFrame(frame, [this, &track](uint64_t dts, uint64_t pts, const Buffer::Ptr &buffer, bool have_idr) {
                 int64_t dts_out, pts_out;
                 track.stamp.revise(dts, pts, dts_out, pts_out);
@@ -157,13 +193,21 @@ bool MP4MuxerInterface::addTrack(const Track::Ptr &track) {
     if (track->getTrackType() == TrackVideo) {
         auto video_track = dynamic_pointer_cast<VideoTrack>(track);
         CHECK(video_track);
-        auto track_id = mp4_writer_add_video(_mov_writter.get(), mp4_object, video_track->getVideoWidth(), video_track->getVideoHeight(), extra_data, extra_size);
+        auto width = video_track->getVideoWidth();
+        auto height = video_track->getVideoHeight();
+        if (!isMovVideoDimensionSafe(width, height)) {
+            WarnL << "Unsafe MP4 video dimensions: " << width << "x" << height
+                  << ", safe range for each dimension: [0, " << kMaxMovVideoDimension << "]";
+            return false;
+        }
+        auto track_id = mp4_writer_add_video(_mov_writter.get(), mp4_object, width, height, extra_data, extra_size);
         if (track_id < 0) {
             WarnL << "mp4_writer_add_video failed: " << video_track->getCodecName();
             return false;
         }
         _tracks[track->getIndex()].track_id = track_id;
         _have_video = true;
+        _non_iframe_video_count = 0;
     } else if (track->getTrackType() == TrackAudio) {
         auto audio_track = dynamic_pointer_cast<AudioTrack>(track);
         CHECK(audio_track);
@@ -175,7 +219,8 @@ bool MP4MuxerInterface::addTrack(const Track::Ptr &track) {
         _tracks[track->getIndex()].track_id = track_id;
     }
 
-    // 尝试音视频同步
+    // 尝试音视频同步  [AUTO-TRANSLATED:5f8b8040]
+    // Try audio and video synchronization
     stampSync();
     return true;
 }
@@ -207,21 +252,25 @@ void MP4MuxerMemory::resetTracks() {
 
 bool MP4MuxerMemory::inputFrame(const Frame::Ptr &frame) {
     if (_init_segment.empty()) {
-        // 尚未生成init segment
+        // 尚未生成init segment  [AUTO-TRANSLATED:b4baa65f]
+        // Init segment has not been generated yet
         return false;
     }
 
-    // flush切片
+    // flush切片  [AUTO-TRANSLATED:c4358dce]
+    // Flush segment
     saveSegment();
 
     auto data = _memory_file->getAndClearMemory();
     if (!data.empty()) {
-        // 输出切片数据
+        // 输出切片数据  [AUTO-TRANSLATED:4bc994c9]
+        // Output segment data
         onSegmentData(std::move(data), _last_dst, _key_frame);
         _key_frame = false;
     }
 
-    if (frame->keyFrame()) {
+    // only audio all frame is key frame
+    if (frame->keyFrame() || !haveVideo()) {
         _key_frame = true;
     }
     if (frame->getTrackType() == TrackVideo || !haveVideo()) {

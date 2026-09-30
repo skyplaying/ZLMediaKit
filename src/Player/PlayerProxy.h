@@ -18,8 +18,7 @@
 
 namespace mediakit {
 
-struct StreamInfo
-{
+struct StreamInfo {
     TrackType codec_type;
     std::string codec_name;
     int bitrate;
@@ -30,8 +29,7 @@ struct StreamInfo
     int video_height;
     float video_fps;
 
-    StreamInfo()
-    {
+    StreamInfo() {
         codec_type = TrackInvalid;
         codec_name = "none";
         bitrate = -1;
@@ -44,14 +42,12 @@ struct StreamInfo
     }
 };
 
-struct TranslationInfo
-{
+struct TranslationInfo {
     std::vector<StreamInfo> stream_info;
     int byte_speed;
     uint64_t start_time_stamp;
 
-    TranslationInfo()
-    {
+    TranslationInfo() {
         byte_speed = -1;
         start_time_stamp = 0;
     }
@@ -64,55 +60,87 @@ class PlayerProxy
 public:
     using Ptr = std::shared_ptr<PlayerProxy>;
 
-    // 如果retry_count<0,则一直重试播放；否则重试retry_count次数
-    // 默认一直重试
-    PlayerProxy(
-        const std::string &vhost, const std::string &app, const std::string &stream_id, const ProtocolOption &option, int retry_count = -1,
-        const toolkit::EventPoller::Ptr &poller = nullptr, int reconnect_delay_min = 2, int reconnect_delay_max = 60, int reconnect_delay_step = 3);
+    // 如果retry_count<0,则一直重试播放；否则重试retry_count次数  [AUTO-TRANSLATED:5582d53c]
+    // If retry_count < 0, then retry playing indefinitely; otherwise, retry retry_count times
+    // 默认一直重试  [AUTO-TRANSLATED:779d3c46]
+    // Default to retrying indefinitely
+    PlayerProxy(const MediaTuple &tuple, const ProtocolOption &option, int retry_count = -1,
+        const toolkit::EventPoller::Ptr &poller = nullptr, 
+        int reconnect_delay_min = 2, int reconnect_delay_max = 60, int reconnect_delay_step = 3);
 
     ~PlayerProxy() override;
 
     /**
      * 设置play结果回调，只触发一次；在play执行之前有效
      * @param cb 回调对象
+     * Set a callback for the play result, triggered only once; effective before play execution
+     * @param cb Callback object
+     
+     * [AUTO-TRANSLATED:f34625f6]
      */
     void setPlayCallbackOnce(std::function<void(const toolkit::SockException &ex)> cb);
 
     /**
      * 设置主动关闭回调
      * @param cb 回调对象
+     * Set a callback for active closure
+     * @param cb Callback object
+     
+     * [AUTO-TRANSLATED:83b7700a]
      */
     void setOnClose(std::function<void(const toolkit::SockException &ex)> cb);
 
     /**
     * Set a callback for failed server connection
     * @param cb 回调对象
+     * Set a callback for failed server connection
+     * @param cb Callback object
+     
+     * [AUTO-TRANSLATED:e7f5e7cc]
     */
     void setOnDisconnect(std::function<void()> cb);
 
     /**
     * Set a callback for a successful connection to the server
     * @param cb 回调对象
+     * Set a callback for a successful connection to the server
+     * @param cb Callback object
+     
+     * [AUTO-TRANSLATED:b88e0d4c]
     */
     void setOnConnect(std::function<void(const TranslationInfo&)> cb);
 
     /**
      * 开始拉流播放
      * @param strUrl
+     * Start streaming playback
+     * @param strUrl
+     
+     * [AUTO-TRANSLATED:a2f0e859]
      */
     void play(const std::string &strUrl) override;
 
     /**
      * 获取观看总人数
+     * Get the total number of viewers
+     
+     * [AUTO-TRANSLATED:6c1b8bf1]
      */
     int totalReaderCount();
 
     int getStatus();
+    std::string getStatusStr() const;
     uint64_t getLiveSecs();
     uint64_t getRePullCount();
 
     // Using this only makes sense after a successful connection to the server
     TranslationInfo getTranslationInfo();
+
+    const std::string& getUrl() const { return _pull_url; }
+    const MediaTuple& getMediaTuple() const { return _tuple; }
+    const ProtocolOption& getOption() const { return _option; }
+
+    void update(const std::string &url, const toolkit::mINI &args);
 
 private:
     // MediaSourceEvent override
@@ -122,19 +150,25 @@ private:
     std::string getOriginUrl(MediaSource &sender) const override;
     std::shared_ptr<toolkit::SockInfo> getOriginSock(MediaSource &sender) const override;
     float getLossRate(MediaSource &sender, TrackType type) override;
+    toolkit::EventPoller::Ptr getOwnerPoller(MediaSource &sender) override;
 
-    void rePlay(const std::string &strUrl, int iFailedCnt);
+    void rePlay(int iFailedCnt);
     void onPlaySuccess();
     void setDirectProxy();
     void setTranslationInfo();
+    static bool isTrackCompatible(const Track::Ptr &track, const Track::Ptr &last_track);
+    bool shouldResetTracks(const Track::Ptr &video_track, const Track::Ptr &audio_track,
+                           const Track::Ptr &last_video_track, const Track::Ptr &last_audio_track) const;
+    void attachPlayerTracks(const Track::Ptr &video_track, const Track::Ptr &audio_track, bool add_to_muxer);
 
 private:
-    ProtocolOption _option;
+    std::shared_ptr<std::string> _status;
     int _retry_count;
     int _reconnect_delay_min;
     int _reconnect_delay_max;
     int _reconnect_delay_step;
     MediaTuple _tuple;
+    ProtocolOption _option;
     std::string _pull_url;
     toolkit::Timer::Ptr _timer;
     std::function<void()> _on_disconnect;
@@ -145,7 +179,8 @@ private:
     MultiMediaSourceMuxer::Ptr _muxer;
 
     toolkit::Ticker _live_ticker;
-    // 0 表示正常 1 表示正在尝试拉流
+    // 0 表示正常 1 表示正在尝试拉流  [AUTO-TRANSLATED:2080bedf]
+    // 0 indicates normal, 1 indicates attempting to stream
     std::atomic<int> _live_status;
     std::atomic<uint64_t> _live_secs;
 

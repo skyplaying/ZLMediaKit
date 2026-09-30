@@ -28,7 +28,8 @@ public:
     virtual ~RtmpProtocol();
 
     void onParseRtmp(const char *data, size_t size);
-    //作为客户端发送c0c1，等待s0s1s2并且回调
+    // 作为客户端发送c0c1，等待s0s1s2并且回调  [AUTO-TRANSLATED:fed23902]
+    // Send c0c1 as a client, wait for s0s1s2 and callback
     void startClientSession(const std::function<void()> &cb, bool complex = true);
 
 protected:
@@ -62,14 +63,16 @@ protected:
     void sendRtmp(uint8_t type, uint32_t stream_index, const std::string &buffer, uint32_t stamp, int chunk_id);
     void sendRtmp(uint8_t type, uint32_t stream_index, const toolkit::Buffer::Ptr &buffer, uint32_t stamp, int chunk_id);
     toolkit::BufferRaw::Ptr obtainBuffer(const void *data = nullptr, size_t len = 0);
-
+    
 private:
     void handle_C1_simple(const char *data);
 #ifdef ENABLE_OPENSSL
+    void handle_S1_complex(const char *data, RtmpHandshake &c2);
     void handle_C1_complex(const char *data);
     std::string get_C1_digest(const uint8_t *ptr,char **digestPos);
     std::string get_C1_key(const uint8_t *ptr);
     void check_C1_Digest(const std::string &digest,const std::string &data);
+    void check_S1_Digest(const std::string &digest,const std::string &data);
     void send_complex_S0S1S2(int schemeType,const std::string &digest);
 #endif //ENABLE_OPENSSL
 
@@ -103,7 +106,8 @@ private:
     std::function<const char * (const char *data, size_t len)> _next_step_func;
     ////////////Chunk////////////
     std::unordered_map<int, std::pair<RtmpPacket::Ptr/*now*/, RtmpPacket::Ptr/*last*/> > _map_chunk_data;
-    //循环池
+    // 循环池  [AUTO-TRANSLATED:cf2e86c5]
+    // Thread pool
     toolkit::ResourcePool<toolkit::BufferRaw> _packet_pool;
 };
 

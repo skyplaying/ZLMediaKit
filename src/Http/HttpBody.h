@@ -26,14 +26,28 @@ namespace mediakit {
 
 /**
  * http content部分基类定义
+ * Base class definition for http content part
+ 
+ * [AUTO-TRANSLATED:1eee419a]
  */
 class HttpBody : public std::enable_shared_from_this<HttpBody>{
 public:
     using Ptr = std::shared_ptr<HttpBody>;
-    virtual ~HttpBody() = default;
+    virtual ~HttpBody() {
+        if (_on_completed) {
+            try {
+                _on_completed();
+            } catch (std::exception &ex) {
+                ErrorL << ex.what();
+            }
+        }
+    }
 
     /**
      * 剩余数据大小，如果返回-1, 那么就不设置content-length
+     * Remaining data size, if -1 is returned, then content-length is not set
+     
+     * [AUTO-TRANSLATED:75375ce7]
      */
     virtual int64_t remainSize() { return 0;};
 
@@ -41,6 +55,11 @@ public:
      * 读取一定字节数，返回大小可能小于size
      * @param size 请求大小
      * @return 字节对象,如果读完了，那么请返回nullptr
+     * Read a certain number of bytes, the returned size may be less than size
+     * @param size Request size
+     * @return Byte object, if it is read, please return nullptr
+     
+     * [AUTO-TRANSLATED:6fd85f91]
      */
     virtual toolkit::Buffer::Ptr readData(size_t size) { return nullptr;};
 
@@ -48,11 +67,19 @@ public:
      * 异步请求读取一定字节数，返回大小可能小于size
      * @param size 请求大小
      * @param cb 回调函数
+     * Asynchronously request to read a certain number of bytes, the returned size may be less than size
+     * @param size Request size
+     * @param cb Callback function
+     
+     * [AUTO-TRANSLATED:a5304046]
      */
     virtual void readDataAsync(size_t size,const std::function<void(const toolkit::Buffer::Ptr &buf)> &cb){
-        //由于unix和linux是通过mmap的方式读取文件，所以把读文件操作放在后台线程并不能提高性能
-        //反而会由于频繁的线程切换导致性能降低以及延时增加，所以我们默认同步获取文件内容
-        //(其实并没有读，拷贝文件数据时在内核态完成文件读)
+        // 由于unix和linux是通过mmap的方式读取文件，所以把读文件操作放在后台线程并不能提高性能  [AUTO-TRANSLATED:59ef443d]
+        // Since unix and linux read files through mmap, putting file reading operations in the background thread does not improve performance
+        // 反而会由于频繁的线程切换导致性能降低以及延时增加，所以我们默认同步获取文件内容  [AUTO-TRANSLATED:93d2a0b5]
+        // On the contrary, frequent thread switching will lead to performance degradation and increased latency, so we get the file content synchronously by default
+        // (其实并没有读，拷贝文件数据时在内核态完成文件读)  [AUTO-TRANSLATED:6eb98a5d]
+        // (Actually, there is no reading, the file data is copied in the kernel state when copying)
         cb(readData(size));
     }
 
@@ -60,14 +87,35 @@ public:
      * 使用sendfile优化文件发送
      * @param fd socket fd
      * @return 0成功，其他为错误代码
+     * Use sendfile to optimize file sending
+     * @param fd socket fd
+     * @return 0 success, other error codes
+     
+     * [AUTO-TRANSLATED:eacc5f98]
      */
     virtual int sendFile(int fd) {
         return -1;
     }
+
+    /**
+     * 写入数据，默认抛出异常表示不支持写入
+     * Write data, default throws exception indicating write not supported
+     */
+    virtual void writeData(const char *data, size_t size, uint64_t content_size) {
+        throw std::runtime_error("HttpBody::writeData not supported");
+    }
+
+    void setOnCompleted(std::function<void()> on_completed) { _on_completed = std::move(on_completed); }
+
+private:
+    std::function<void()> _on_completed;
 };
 
 /**
  * std::string类型的content
+ * std::string type content
+ 
+ * [AUTO-TRANSLATED:59fc3e5b]
  */
 class HttpStringBody : public HttpBody{
 public:
@@ -84,6 +132,9 @@ private:
 
 /**
  * Buffer类型的content
+ * Buffer type content
+ 
+ * [AUTO-TRANSLATED:350b9513]
  */
 class HttpBufferBody : public HttpBody{
 public:
@@ -97,10 +148,21 @@ private:
     toolkit::Buffer::Ptr _buffer;
 };
 
+class HttpFileBodyBase  : public HttpBody {
+public:
+    using Ptr = std::shared_ptr<HttpFileBodyBase>;
+
+    virtual void setRange(uint64_t offset, uint64_t max_size) = 0;
+    virtual ~HttpFileBodyBase() = default;
+};
+
 /**
  * 文件类型的content
+ * File type content
+ 
+ * [AUTO-TRANSLATED:baf9c0f3]
  */
-class HttpFileBody : public HttpBody {
+class HttpFileBody : public HttpFileBodyBase {
 public:
     using Ptr = std::shared_ptr<HttpFileBody>;
 
@@ -108,6 +170,11 @@ public:
      * 构造函数
      * @param file_path 文件路径
      * @param use_mmap 是否使用mmap方式访问文件
+     * Constructor
+     * @param file_path File path
+     * @param use_mmap Whether to use mmap to access the file
+     
+     * [AUTO-TRANSLATED:40c85c53]
      */
     HttpFileBody(const std::string &file_path, bool use_mmap = true);
 
@@ -115,8 +182,13 @@ public:
      * 设置读取范围
      * @param offset 相对文件头的偏移量
      * @param max_size 最大读取字节数
+     * Set the reading range
+     * @param offset Offset relative to the file header
+     * @param max_size Maximum number of bytes to read
+     
+     * [AUTO-TRANSLATED:30532a4e]
      */
-    void setRange(uint64_t offset, uint64_t max_size);
+    void setRange(uint64_t offset, uint64_t max_size) override;
 
     int64_t remainSize() override;
     toolkit::Buffer::Ptr readData(size_t size) override;
@@ -130,10 +202,44 @@ private:
     toolkit::ResourcePool<toolkit::BufferRaw> _pool;
 };
 
+/**
+ * 文件写入类型的content，支持通过writeData向文件追加写入
+ * File storage content, supports appending data to a file via writeData
+ */
+class HttpFileStorage : public HttpBody {
+public:
+    using Ptr = std::shared_ptr<HttpFileStorage>;
+
+    /**
+     * @param file_path 直接以二进制覆盖写入的路径；未完成的上传会删除该路径。需要保护正式文件时，调用方应
+     *                  传入临时路径，并在请求处理完成后自行发布到正式路径。
+     * @param file_path Path opened directly in binary truncate mode and removed after an incomplete upload. To protect
+     *                  a published file, pass a temporary path and publish it from the completed-request handler.
+     */
+    HttpFileStorage(std::string file_path);
+    ~HttpFileStorage() override;
+    HttpFileStorage(const HttpFileStorage &) = delete;
+    HttpFileStorage &operator=(const HttpFileStorage &) = delete;
+
+    void writeData(const char *data, size_t size, uint64_t content_size) override;
+    int64_t remainSize() override;
+    toolkit::Buffer::Ptr readData(size_t size) override;
+    const std::string& filePath() const;
+
+private:
+    FILE *_fp = nullptr;
+    uint64_t _written = 0;
+    uint64_t _content_size = 0;
+    std::string _path;
+};
+
 class HttpArgs;
 
 /**
  * http MultiForm 方式提交的http content
+ * http MultiForm way to submit http content
+ 
+ * [AUTO-TRANSLATED:211a2d8e]
  */
 class HttpMultiFormBody : public HttpBody {
 public:
@@ -144,6 +250,13 @@ public:
      * @param args http提交参数列表
      * @param filePath 文件路径
      * @param boundary boundary字符串
+     * Constructor
+     * @param args http submission parameter list
+     * @param filePath File path
+     * @param boundary Boundary string
+     
+     
+     * [AUTO-TRANSLATED:d093cfa7]
      */
     HttpMultiFormBody(const HttpArgs &args,const std::string &filePath,const std::string &boundary = "0xKhTmLbOuNdArY");
     int64_t remainSize() override ;
@@ -159,7 +272,7 @@ private:
     int64_t _totalSize;
     std::string _bodyPrefix;
     std::string _bodySuffix;
-    HttpFileBody::Ptr _fileBody;
+    HttpFileBodyBase::Ptr _fileBody;
 };
 
 }//namespace mediakit

@@ -4,6 +4,11 @@
 using namespace std;
 using namespace mediakit;
 
+namespace {
+// Prevent unbounded memory growth from malformed/hostile RTP/JPEG streams.
+constexpr size_t kMaxRtpJpegFrameSize = 16 * 1024 * 1024;
+}
+
 #define AV_WB24(p, d)                                                                                                  \
     do {                                                                                                               \
         ((uint8_t *)(p))[2] = (d);                                                                                     \
@@ -133,7 +138,7 @@ static inline void bytestream2_put_be16(PutByteContext *p, uint16_t value) {
     }
 }
 
-static inline void bytestream2_put_be24(PutByteContext *p, uint16_t value) {
+static inline void bytestream2_put_be24(PutByteContext *p, uint32_t value) {
     if (!p->eof && (p->buffer_end - p->buffer >= 2)) {
         p->buffer[0] = value >> 16;
         p->buffer[1] = value >> 8;
@@ -539,6 +544,13 @@ static int jpeg_parse_packet(void *ctx, PayloadContext *jpeg, uint32_t *timestam
                                             height, qtables,
                                             qtable_len / 64, dri);
 
+        if ((size_t)jpeg->hdr_size > kMaxRtpJpegFrameSize) {
+            jpeg->frame.clear();
+            av_log(ctx, AV_LOG_ERROR,
+                   "RTP/JPEG header is too large; dropping frame.\n");
+            return AVERROR_INVALIDDATA;
+        }
+
         /* Copy JPEG header to frame buffer. */
         avio_write(jpeg->frame, hdr, jpeg->hdr_size);
     }
@@ -561,6 +573,13 @@ static int jpeg_parse_packet(void *ctx, PayloadContext *jpeg, uint32_t *timestam
         av_log(ctx, AV_LOG_ERROR,
                "Missing packets; dropping frame.\n");
         return AVERROR_EAGAIN;
+    }
+
+    if (jpeg->frame.size() + len + 2 > kMaxRtpJpegFrameSize) {
+        jpeg->frame.clear();
+        av_log(ctx, AV_LOG_ERROR,
+               "RTP/JPEG frame is too large; dropping frame.\n");
+        return AVERROR_INVALIDDATA;
     }
 
     /* Copy data to frame buffer. */
@@ -598,7 +617,7 @@ void JPEGRtpEncoder::rtpSendJpeg(const uint8_t *buf, int size, uint64_t pts, uin
 {
     const uint8_t *qtables[4] = { NULL };
     int nb_qtables = 0;
-    uint8_t w, h;
+    uint8_t w { 0 }, h { 0 };
     uint8_t *p;
     int off = 0; /* fragment offset of the current JPEG frame */
     int len;
@@ -632,7 +651,8 @@ void JPEGRtpEncoder::rtpSendJpeg(const uint8_t *buf, int size, uint64_t pts, uin
             for (j = 0; j < tables; j++)
                 qtables[nb_qtables + j] = buf + i + 5 + j * 65;
             nb_qtables += tables;
-            // 大致忽略DQT/qtable所占字节数，提高搜寻速度
+            // 大致忽略DQT/qtable所占字节数，提高搜寻速度  [AUTO-TRANSLATED:63423997]
+            // Roughly ignore the number of bytes occupied by DQT/qtable to improve search speed
             i += tables << 6;
         } else if (buf[i + 1] == SOF0) {
             if (buf[i + 14] != 17 || buf[i + 17] != 17) {
@@ -642,7 +662,8 @@ void JPEGRtpEncoder::rtpSendJpeg(const uint8_t *buf, int size, uint64_t pts, uin
             }
             h = (buf[i + 5] * 256 + buf[i + 6]) / 8;
             w = (buf[i + 7] * 256 + buf[i + 8]) / 8;
-            // 大致忽略SOF0所占字节数，提高搜寻速度
+            // 大致忽略SOF0所占字节数，提高搜寻速度  [AUTO-TRANSLATED:438cbf70]
+            // Roughly ignore the number of bytes occupied by SOF0 to improve search speed
             i += 16;
         } else if (buf[i + 1] == DHT) {
             int dht_size = AV_RB16(&buf[i + 2]);
@@ -811,7 +832,8 @@ bool JPEGRtpDecoder::inputRtp(const RtpPacket::Ptr &rtp, bool) {
     auto seq = rtp->getSeq();
     auto marker = rtp->getHeader()->mark;
     if (size <= 0) {
-        //无实际负载
+        // 无实际负载  [AUTO-TRANSLATED:305af48f]
+        // No actual load
         return false;
     }
 
@@ -829,7 +851,8 @@ bool JPEGRtpDecoder::inputRtp(const RtpPacket::Ptr &rtp, bool) {
 ////////////////////////////////////////////////////////////////////////
 
 bool JPEGRtpEncoder::inputFrame(const Frame::Ptr &frame) {
-    // JFIF头固定20个字节长度
+    // JFIF头固定20个字节长度  [AUTO-TRANSLATED:bd63b447]
+    // JFIF header is fixed at 20 bytes in length
     auto ptr = (uint8_t *)frame->data() + frame->prefixSize() + JPEGFrameImp::kJFIFSize;
     auto len = frame->size() - frame->prefixSize() - JPEGFrameImp::kJFIFSize;
     auto pts = frame->pts();

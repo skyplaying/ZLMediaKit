@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include "MediaPlayer.h"
+#include "Common/config.h"
 
 using namespace std;
 using namespace toolkit;
@@ -26,7 +27,8 @@ static void setOnCreateSocket_l(const std::shared_ptr<PlayerBase> &delegate, con
         if (cb) {
             helper->setOnCreateSocket(cb);
         } else {
-            //客户端，确保开启互斥锁
+            // 客户端，确保开启互斥锁  [AUTO-TRANSLATED:a75e6e36]
+            // Client, ensure mutual exclusion lock is enabled
             helper->setOnCreateSocket([](const EventPoller::Ptr &poller) {
                 return Socket::createSocket(poller, true);
             });
@@ -35,7 +37,7 @@ static void setOnCreateSocket_l(const std::shared_ptr<PlayerBase> &delegate, con
 }
 
 void MediaPlayer::play(const string &url) {
-    _delegate = PlayerBase::createPlayer(_poller, url);
+    _delegate = PlayerBase::createPlayer(_poller, url, (*this)[Client::kSchema]);
     assert(_delegate);
     setOnCreateSocket_l(_delegate, _on_create_socket);
     _delegate->setOnShutdown(_on_shutdown);

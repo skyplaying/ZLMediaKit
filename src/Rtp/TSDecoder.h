@@ -20,7 +20,8 @@
 
 namespace mediakit {
 
-//TS包分割器，用于split一个一个的ts包
+// TS包分割器，用于split一个一个的ts包  [AUTO-TRANSLATED:a10b66b3]
+// TS package splitter, used to split one ts package at a time
 class TSSegment : public HttpRequestSplitter {
 public:
     typedef std::function<void(const char *data,size_t len)> onSegment;
@@ -29,21 +30,26 @@ public:
     static bool isTSPacket(const char *data, size_t len);
 
 protected:
+    void onReset() override;
     ssize_t onRecvHeader(const char *data, size_t len) override ;
     const char *onSearchPacketTail(const char *data, size_t len) override ;
 
 private:
+    const char *searchPacketTailUnSynced(const char *data, size_t len);
     size_t _size;
+    bool _is_synced = false;
     onSegment _onSegment;
 };
 
 #if defined(ENABLE_HLS)
-//ts解析器
+// ts解析器  [AUTO-TRANSLATED:f2b9f0cc]
+// ts parser
 class TSDecoder : public Decoder {
 public:
     TSDecoder();
     ~TSDecoder();
     ssize_t input(const uint8_t* data, size_t bytes) override ;
+    void clearInputCache() override;
 
 private:
     TSSegment _ts_segment;
